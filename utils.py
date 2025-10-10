@@ -2,6 +2,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from tokenizers import Tokenizer
+import re
+import os
+
+def filter_words(input_file, output_file):
+    seen = set()
+    with open(input_file, 'r') as f_in:
+        with open(output_file, 'w', encoding="utf-8") as f_out:
+            for line in f_in:
+                word = line.strip().lower()
+                # Проверяем, что слово состоит только из латинских букв
+                if re.fullmatch(r'[a-z]+', word):
+                    if word not in seen:
+                        seen.add(word)
+                        f_out.write(word + '\n')
+
 
 
 def make_linear_schedule(T: int, start: float = 0.0, end: float = 0.9):
@@ -40,3 +55,39 @@ def sample_from_model(model: nn.Module, tokenizer: Tokenizer, seq_len: int, T: i
         ids = [i for i in ids if i != pad_id]
     text = tokenizer.decode(ids)
     return text, ids
+
+def save_denoising_trace(model, tokenizer, seq_len, T, alphas, device, n_examples, out_dir, out_file):
+    """Save step-by-step denoising trajectories for inspection."""
+    vocab = tokenizer.get_vocab()
+    traces = []
+
+    for _ in range(n_examples):
+        # start from full noise (random tokens)
+        xt = torch.randint(0, len(vocab), (1, seq_len), device=device)
+        trace = []
+
+        for t in range(T, 0, -1):
+            logits = model(xt, torch.tensor([t], device=device))
+            probs = torch.softmax(logits, dim=-1)
+            xt = torch.multinomial(probs[0], num_samples=1).squeeze(1).unsqueeze(0)  # resample tokens
+            text = tokenizer.decode(xt[0].tolist())
+            trace.append(f"t={t}: {text}")
+
+        traces.append("\n".join(trace))
+
+    with open(os.path.join(out_dir, out_file), "w") as f:
+        for i, tr in enumerate(traces):
+            f.write(f"\n=== Example {i+1} ===\n{tr}\n")
+
+def save_epoch_samples(model, tokenizer, seq_len, T, alphas, device, epoch, out_dir, name, xt_pregen  ):
+    """Generate 10 samples and append to a log file for this run."""
+    samples = []
+    for _ in range(10):
+        text, _ = sample_from_model(model, tokenizer, seq_len, T, alphas, device, xt_sample = xt_pregen)
+        samples.append(text)
+    with open(os.path.join(out_dir, "epoch_samples.txt"), "a") as f:
+        if epoch == 0:
+            f.write(f"\n{name}\n")
+        f.write(f"\n=== Epoch {epoch+1} ===\n")
+        f.write("\n".join(samples) + "\n")
+

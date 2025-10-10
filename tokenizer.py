@@ -16,7 +16,7 @@ def load_tokenizer(path: str) -> Tokenizer:
     tok = Tokenizer.from_file(path)
     return tok
 
-def load_words_file(path: str) -> List[str]:
+def load_words_file(path: str, seq_len: int = 8) -> List[str]:
     with open(path, 'r', encoding='utf8') as f:
         words = [w.strip() for w in f if w.strip()]
     seen = set()
@@ -25,6 +25,7 @@ def load_words_file(path: str) -> List[str]:
         if w not in seen:
             uniq.append(w)
             seen.add(w)
+    uniq = [word for word in uniq if len(word) <= seq_len ]
     return uniq
 
 
