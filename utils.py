@@ -48,7 +48,7 @@ def sample_from_model(model: nn.Module, tokenizer: Tokenizer, seq_len: int, T: i
             # Getting prediction on every step using random sampling due to logits
             xt = torch.multinomial(probs.view(-1, vocab_size), num_samples=1).view(batch, seq_len)
     # decode first sequence
-    ids = xt[0].tolist()
+    ids = xt[0].tolist() 
     # remove padding tokens
     if tokenizer.token_to_id('[PAD]') is not None:
         pad_id = tokenizer.token_to_id('[PAD]')

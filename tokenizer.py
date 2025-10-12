@@ -1,6 +1,7 @@
 from tokenizers import Tokenizer, models, trainers, pre_tokenizers
 from typing import List
 
+MASK_ID = 2
 
 def train_bpe_tokenizer(words_file: str, vocab_size: int, save_path: str):
     """Train a BPE tokenizer on the provided words file and save it to save_path."""

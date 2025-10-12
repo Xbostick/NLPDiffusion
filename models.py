@@ -49,3 +49,63 @@ class SimpleDiffusionTransformer(nn.Module):
         h = self.transformer(h)
         logits = self.out_proj(h)
         return logits
+    
+
+class SimpleDiffusionMLP(nn.Module):
+    """
+    Simplified diffusion model without Transformer — only token/time MLPs.
+    Each token position is processed independently with local MLPs.
+    """
+    def __init__(self, vocab_size, d_model=256, seq_len=8, T=200, padding_idx=0):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.d_model = d_model
+        self.seq_len = seq_len
+
+        # Embeddings
+        self.token_emb = nn.Embedding(vocab_size, d_model, padding_idx=padding_idx)
+        self.pos_emb = nn.Embedding(seq_len, d_model)
+        self.time_emb = TimeEmbedding(T, d_model)
+
+        # Simple 2-layer MLP
+        self.fc1 = nn.Linear(d_model, d_model * 2)
+        self.fc2 = nn.Linear(d_model * 2, d_model)
+        self.act = nn.GELU()
+
+        # Output projection
+        self.out_proj = nn.Linear(d_model, vocab_size)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.normal_(self.token_emb.weight, std=0.02)
+        nn.init.normal_(self.pos_emb.weight, std=0.02)
+        nn.init.normal_(self.time_emb.emb.weight, std=0.02)
+        nn.init.xavier_uniform_(self.fc1.weight)
+        nn.init.xavier_uniform_(self.fc2.weight)
+        nn.init.xavier_uniform_(self.out_proj.weight)
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.zeros_(self.fc2.bias)
+        nn.init.zeros_(self.out_proj.bias)
+
+    def forward(self, x: torch.LongTensor, t: torch.LongTensor):
+        """
+        x: (batch, seq_len)
+        t: (batch,)
+        """
+        batch, seq_len = x.shape
+        tok = self.token_emb(x)
+        pos_ids = torch.arange(seq_len, device=x.device).unsqueeze(0).expand(batch, -1)
+        pos = self.pos_emb(pos_ids)
+        time = self.time_emb(t).unsqueeze(1).expand(-1, seq_len, -1)
+
+        h = tok + pos + time
+
+        # Pass through local MLP per token position
+        h = self.fc1(h)
+        h = self.act(h)
+        h = self.fc2(h)
+        h = self.act(h)
+
+        logits = self.out_proj(h)
+        return logits
