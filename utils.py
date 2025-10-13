@@ -56,7 +56,7 @@ def sample_from_model(model: nn.Module, tokenizer: Tokenizer, seq_len: int, T: i
     text = tokenizer.decode(ids)
     return text, ids
 
-def save_denoising_trace(model, tokenizer, seq_len, T, alphas, device, n_examples, out_dir, out_file):
+def save_denoising_trace(model, tokenizer, sampler, seq_len, T, alphas, device, n_examples, out_dir, out_file):
     """Save step-by-step denoising trajectories for inspection."""
     vocab = tokenizer.get_vocab()
     traces = []
@@ -67,9 +67,9 @@ def save_denoising_trace(model, tokenizer, seq_len, T, alphas, device, n_example
         trace = []
 
         for t in range(T, 0, -1):
-            logits = model(xt, torch.tensor([t], device=device))
-            probs = torch.softmax(logits, dim=-1)
-            xt = torch.multinomial(probs[0], num_samples=1).squeeze(1).unsqueeze(0)  # resample tokens
+            ids = sampler.reverse_diffusion(model,seq_len, T)
+            text = torch.softmax(ids, dim=-1)
+            # xt = torch.multinomial(probs[0], num_samples=1).squeeze(1).unsqueeze(0)  # resample tokens
             text = tokenizer.decode(xt[0].tolist())
             trace.append(f"t={t}: {text}")
 
@@ -79,11 +79,13 @@ def save_denoising_trace(model, tokenizer, seq_len, T, alphas, device, n_example
         for i, tr in enumerate(traces):
             f.write(f"\n=== Example {i+1} ===\n{tr}\n")
 
-def save_epoch_samples(model, tokenizer, seq_len, T, alphas, device, epoch, out_dir, name, xt_pregen  ):
+def save_epoch_samples(model, tokenizer, sampler, seq_len, T, alphas, device, epoch, out_dir, name, xt_pregen  ):
     """Generate 10 samples and append to a log file for this run."""
     samples = []
     for _ in range(10):
-        text, _ = sample_from_model(model, tokenizer, seq_len, T, alphas, device, xt_sample = xt_pregen)
+        ids = sampler.reverse_diffusion(model,seq_len, T)
+        text = tokenizer.decode(ids)
+        # text, _ = sample_from_model(model, tokenizer, seq_len, T, alphas, device, xt_sample = xt_pregen)
         samples.append(text)
     with open(os.path.join(out_dir, "epoch_samples.txt"), "a") as f:
         if epoch == 0:

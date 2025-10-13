@@ -58,12 +58,12 @@ class MaskedDiffusionSampler(BaseDiffusionSampler):
         return x_t_1, x_t
 
     @torch.no_grad()
-    def reverse_diffusion(self, model, seq_len: int):
+    def reverse_diffusion(self, model, seq_len: int, T: int):
         """
         Reverse sampling: categorical denoising.
         """
-        x_t = torch.randint(0, self.vocab_size, (1, seq_len), device=self.device)
-        for t in reversed(range(1, self.T + 1)):
+        x_t = torch.tensor([self.mask_id] * seq_len, device=self.device)
+        for t in reversed(range(1, T + 1)):
             t_tensor = torch.tensor([t], device=self.device)
             logits = model(x_t, t_tensor)
             probs = F.softmax(logits, dim=-1)

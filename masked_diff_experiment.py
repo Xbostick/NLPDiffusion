@@ -76,9 +76,9 @@ def run_experiment(words_file, tokenizer_path, out_dir, T, seq_len, epochs=N_EPO
                     loss_T_last[ti-1] += loss.item()
                     counts[ti-1] += 1
         
-        save_epoch_samples(model, tokenizer, seq_len, T, alphas, device, epoch, out_dir, 
+        save_epoch_samples(model, tokenizer, sampler, seq_len, T, alphas, device, epoch, out_dir, 
                            name = f"len = {seq_len}, T = {T}", xt_pregen = XT_PREGEN)
-        save_denoising_trace(model, tokenizer, seq_len, T, alphas, device, n_examples=10, out_dir=out_dir, out_file=f"len = {seq_len}, T = {T}_denoise.txt")
+        save_denoising_trace(model, tokenizer,sampler, seq_len, T, alphas, device, n_examples=10, out_dir=out_dir, out_file=f"len = {seq_len}, T = {T}_denoise.txt")
 
 
     avg_loss_T = loss_T_last / np.maximum(counts, 1)
