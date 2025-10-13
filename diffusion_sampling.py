@@ -49,7 +49,7 @@ class MaskedDiffusionSampler(BaseDiffusionSampler):
         alpha_t = self.alphas[t].unsqueeze(1).to(self.device)
         rand = torch.rand(b, seq, device=self.device)
         replace_mask_t = rand >= alpha_t
-        while not torch.all(replace_mask_t_1 == replace_mask_t):
+        while torch.all(replace_mask_t_1 == replace_mask_t):
             rand = torch.rand(b, seq, device=self.device)
             replace_mask_t = rand >= alpha_t
         x_t = x_t_1.clone()
