@@ -30,23 +30,32 @@ class BaseDiffusionSampler(ABC):
         """
         pass
 
-class DiscreteDiffusionSampler(BaseDiffusionSampler):
-    def __init__(self, T, alphas, device, vocab_size):
+class MaskedDiffusionSampler(BaseDiffusionSampler):
+    def __init__(self, T, alphas, device, mask_id):
         super().__init__(T, alphas, device)
-        self.vocab_size = vocab_size
+        self.mask_id = mask_id
 
     def forward_diffusion(self, x0: torch.LongTensor, t: torch.LongTensor):
         """
-        Replace tokens in x0 with random tokens according to (1 - alpha_t)
+        Masking tokens from xt-1 to xt with MASK token according to (1 - alpha_t)
         """
         b, seq = x0.shape
+        alpha_t_1 = self.alphas[t].unsqueeze(1).to(self.device)
+        rand = torch.rand(b, seq, device=self.device)
+        replace_mask_t_1 = rand >= alpha_t_1
+        x_t_1 = x0.clone()
+        x_t_1[replace_mask_t_1] = self.mask_id
+
         alpha_t = self.alphas[t].unsqueeze(1).to(self.device)
         rand = torch.rand(b, seq, device=self.device)
-        replace_mask = rand >= alpha_t
-        random_tokens = torch.randint(0, self.vocab_size, (b, seq), device=self.device)
-        x_t = x0.clone()
-        x_t[replace_mask] = random_tokens[replace_mask]
-        return x_t, replace_mask
+        replace_mask_t = rand >= alpha_t
+        while not torch.all(replace_mask_t_1 == replace_mask_t):
+            rand = torch.rand(b, seq, device=self.device)
+            replace_mask_t = rand >= alpha_t
+        x_t = x_t_1.clone()
+        x_t[replace_mask_t] = self.mask_id
+        
+        return x_t_1, x_t
 
     @torch.no_grad()
     def reverse_diffusion(self, model, seq_len: int):
