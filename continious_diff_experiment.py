@@ -8,20 +8,25 @@ from itertools import product
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
-from Models import SimpleDiffusionTransformer, SimpleDiffusionMLP
+from Models import SimplexDiffusionMLP, SimpleDiffusionMLP
 from Tokenizers import encode_words_to_ids, load_tokenizer, load_words_file, MASK_ID
 from types_ import BPEWordDataset
 from utils import make_linear_schedule, sample_from_model, save_denoising_trace, save_epoch_samples, run_experiment
-from Samplers import MaskedDiffusionSampler
-from Experiments import DiffusionExperiment
+from Samplers import ContinuousEmbeddingDiffusionSampler
+from Experiments import ContiniousDiffusionExperiment
 
 RESULT_PATH = 'results'
 TOKENIZER_PATH = "models/cleared_tokenizer_bpe.json"
 WORDS_FILE = "data/cleared_dict.txt"
 BATCH_SIZE = 64
-T = 25
-SEQ_LEN = 15
-N_EPOCHS = 200
+T = 10
+SEQ_LEN = 5
+N_EPOCHS = 2
+
+
+
+
+
 
 if __name__ == "__main__":
     # Example run with reduced sweep for runtime
@@ -36,9 +41,12 @@ if __name__ == "__main__":
     encoded = encode_words_to_ids(words, tokenizer, SEQ_LEN, 1)
     ds = BPEWordDataset(encoded)
     dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
-    model = SimpleDiffusionTransformer(vocab_size=vocab_size, d_model=256, n_heads=4, n_layers=4, seq_len=SEQ_LEN, T=T).to(device)
     
-    sampler = MaskedDiffusionSampler(T,alphas,"cuda", MASK_ID, vocab_size)
+    
+    model = SimpleDiffusionMLP(vocab_size=vocab_size, seq_len=SEQ_LEN, T=T).to(device)
+    sampler = ContinuousEmbeddingDiffusionSampler(T, alphas, device, embedding_layer=model.token_emb)
 
-    exp = DiffusionExperiment(model,tokenizer, sampler,dl, RESULT_PATH, T, SEQ_LEN,vocab_size, epochs= N_EPOCHS, alphas=alphas)
+    exp = ContiniousDiffusionExperiment(model,tokenizer, sampler,dl, RESULT_PATH, T, SEQ_LEN,vocab_size, epochs= N_EPOCHS, alphas=alphas)
     exp.run()
+
+    

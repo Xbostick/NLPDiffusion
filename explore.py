@@ -8,7 +8,7 @@ from itertools import product
 from tqdm import tqdm
 
 from models import SimpleDiffusionTransformer, SimpleDiffusionMLP
-from tokenizer import encode_words_to_ids, load_tokenizer, load_words_file
+from Tokenizers import encode_words_to_ids, load_tokenizer, load_words_file
 from types_ import BPEWordDataset
 from utils import make_linear_schedule, sample_from_model, save_denoising_trace, save_epoch_samples
 

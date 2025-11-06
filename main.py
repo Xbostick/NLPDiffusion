@@ -5,8 +5,8 @@ from torch.utils.data import DataLoader
 import torch.nn as nn
 from tqdm import tqdm
 
-from models import SimpleDiffusionTransformer
-from tokenizer import encode_words_to_ids, load_tokenizer, load_words_file, train_bpe_tokenizer
+from Models import SimpleDiffusionTransformer
+from Tokenizers import encode_words_to_ids, load_tokenizer, load_words_file, train_bpe_tokenizer
 from types_ import BPEWordDataset
 from utils import make_linear_schedule, sample_from_model
 
@@ -69,6 +69,8 @@ def train(args):
             xt[replace_mask] = random_tokens[replace_mask]
 
             logits = model(xt, t)
+            print(logits.shape, x0.shape)
+            print(logits.view(-1, vocab_size).shape, x0.view(-1).shape )
             loss = criterion(logits.view(-1, vocab_size), x0.view(-1))
 
             optimizer.zero_grad()
