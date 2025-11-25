@@ -6,14 +6,15 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
 import torch.nn.functional as F
+import shutil
+from pathlib import Path
 
-
-from utils import make_linear_schedule, sample_from_model, save_denoising_trace, save_epoch_samples
 
 class BaseExperiment(ABC):
-    def __init__(self, model, tokenizer, sampler, dataloader, out_dir,
+    def __init__(self, model, tokenizer, sampler, dataloader, out_dir, 
                  T, seq_len, vocab_size, epochs, alphas,
-                 batch_size=64, lr=1e-5, device="cuda"):
+                 batch_size=64, lr=1e-4, device="cuda", clear_output = True,
+                 denoise_trace_count = 10, samples_count = 10, final_samples_count = 50):
         self.model = model
         self.tokenizer = tokenizer
         self.sampler = sampler
@@ -27,22 +28,32 @@ class BaseExperiment(ABC):
         self.batch_size = batch_size
         self.lr = lr
         self.device = device
-
-        self.optimizer = self.configure_optimizer()
-        self.criterion = self.configure_loss()
+       
 
         self.loss_T_last = np.zeros(T)
         self.loss_epochs = np.zeros(epochs)
         self.counts = np.zeros(T)
+        self.weight_decay = 1e-2
 
-        os.makedirs(out_dir, exist_ok=True)
+        self.denoise_trace_count = denoise_trace_count
+        self.samples_count = samples_count
+        self.final_samples_count = final_samples_count
+        
+        self.criterion = self.configure_loss()
+        self.optimizer = self.configure_optimizer()
+
+        if clear_output:
+            dirpath = Path(out_dir)
+            if dirpath.exists() and dirpath.is_dir():
+                shutil.rmtree(dirpath)
+        dirpath.mkdir(exist_ok= True)
 
     # === Configurable parts ===
-    def configure_optimizer(self):
-        return torch.optim.AdamW(self.model.parameters(), lr=self.lr)
+    def configure_optimizer(self, optimizer = torch.optim.AdamW):
+        return optimizer(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
-    def configure_loss(self):
-        return nn.CrossEntropyLoss()
+    def configure_loss(self, loss_fuction = nn.CrossEntropyLoss):
+        return loss_fuction()
 
     # === Main experiment loop ===
     def run(self):
@@ -55,15 +66,16 @@ class BaseExperiment(ABC):
         # summarize results
         avg_loss_T = self.loss_T_last / np.maximum(self.counts, 1)
         self.save_loss_T_plot(avg_loss_T)
-        self.save_samples(avg_loss_T)
+        self.save_samples()
         self.save_loss_plot(self.loss_epochs)
         return avg_loss_T
 
-    # === Core methods to override ===
-    @abstractmethod
+
     def forward_pass(self, x0, t):
-        """Defines how model processes a batch. Returns logits, ground_truth."""
-        pass
+        # corruption step
+        ground_truth, model_input = self.sampler.forward_diffusion(x0, t)
+        logits = self.model(model_input, t)
+        return logits, ground_truth
 
     @abstractmethod
     def count_loss(self, prediction, target):
@@ -85,6 +97,7 @@ class BaseExperiment(ABC):
 
             self.optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
             with torch.no_grad():
                 epoch_loss += loss
@@ -126,163 +139,53 @@ class BaseExperiment(ABC):
         plot_path = os.path.join(self.out_dir, f"loss_seq{self.seq_len}_{self.T}_by_epochs.png")
         plt.savefig(plot_path, dpi=200)
         plt.close()
-    
 
-    @abstractmethod
     def save_epoch_results(self, epoch):
-        """Hook for generating samples or diagnostics per epoch."""
-        pass
+        """denoising trace"""
+        traces = []
+        for i in range(self.denoise_trace_count):
+            trace = self.sampler.reverse_diffusion(self.model, self.seq_len, self.T)
+            print(trace)
+            trace_decoded = [self.tokenizer.decode(x_t.cpu().detach().numpy()[0], skip_special_tokens=False) for x_t in trace]
+            traces.append("\n".join(trace_decoded))
+        with open(os.path.join(self.out_dir, f"len={self.seq_len},T={self.T}_denoise.txt"), "w") as f:
+            for i, tr in enumerate(traces):
+                f.write(f"\n=== Example {i+1} ===\n{tr}\n")
 
-    @abstractmethod
-    def save_samples(self, avg_loss_T):
+        """ sampling """
+        samples = [self.sampler.reverse_diffusion(self.model, self.seq_len, self.T)[-1] for _ in range(self.samples_count)]
+        samples_decoded = [self.tokenizer.decode(x_t.cpu().detach().numpy()[0], skip_special_tokens=False) for x_t in samples]
+
+        with open(os.path.join(self.out_dir, "epoch_samples.txt"), "a") as f:
+            if epoch == 0:
+                f.write(f"\n{f"len={self.seq_len}, T={self.T}"}\n")
+            f.write(f"\n=== Epoch {epoch+1} ===\n")
+            f.write("\n".join(samples_decoded) + "\n")
+
+
+    def save_samples(self):
         """Final sample generation."""
-        pass
+
+        samples = [self.sampler.reverse_diffusion(self.model, self.seq_len, self.T)[-1] for _ in range(self.final_samples_count)]
+        samples_decoded = [self.tokenizer.decode(x_t.cpu().detach().numpy()[0], skip_special_tokens=False) for x_t in samples]
+
+        with open(os.path.join(self.out_dir, f"samples_seq{self.seq_len}_T{self.T}.txt"), "w") as f:
+            f.write("\n".join(samples_decoded))
 
 
 class MaskedDiffusionExperiment(BaseExperiment):
-    def forward_pass(self, x0, t):
-        # corruption step
-        ground_truth, model_input = self.sampler.forward_diffusion(x0, t)
-        logits = self.model(model_input, t)
-        return logits, ground_truth
-
-    def save_epoch_results(self, epoch):
-        save_epoch_samples(
-            self.model, self.tokenizer, self.sampler,
-            self.seq_len, self.T, self.alphas,
-            self.device, epoch, self.out_dir,
-            name=f"len={self.seq_len}, T={self.T}"
-        )
-
-        save_denoising_trace(
-            self.model, self.tokenizer, self.sampler,
-            self.seq_len, self.T, self.alphas,
-            self.device, n_examples=10,
-            out_dir=self.out_dir,
-            out_file=f"len={self.seq_len},T={self.T}_denoise.txt"
-        )
-
-    def save_samples(self, avg_loss_T):
-        samples = []
-        for _ in range(50):
-                    
-            self.model.eval()
-            if sample_steps is None:
-                sample_steps = list(range(self.T, 0, -1))
-            batch = 1
-            vocab_size = len(self.tokenizer.get_vocab())
-            xt = torch.randint(0, vocab_size, (batch, self.seq_len), device=self.device, dtype=torch.long)
-            with torch.no_grad():
-                for t in sample_steps:
-                    t_idx = torch.tensor([t], device=self.device, dtype=torch.long)
-                    logits = self.model(xt, t_idx)  # (1, seq_len, vocab)
-                    probs = F.softmax(logits, dim=-1)
-                    # Getting prediction on every step using random sampling due to logits
-                    xt = torch.multinomial(probs.view(-1, vocab_size), num_samples=1).view(batch, self.seq_len)
-            # decode first sequence
-            ids = xt[0].tolist() 
-            # remove padding tokens
-            if self.tokenizer.token_to_id('[PAD]') is not None:
-                pad_id = self.tokenizer.token_to_id('[PAD]')
-                ids = [i for i in ids if i != pad_id]
-            text = self.tokenizer.decode(ids, skip_special_tokens=False)
-            
-            samples.append(text)
-
-        with open(os.path.join(self.out_dir, f"samples_seq{self.seq_len}_T{self.T}.txt"), "w") as f:
-            f.write("\n".join(samples))
-
-class DiscreteDiffusionExperiment(BaseExperiment):
-    def forward_pass(self, x0, t):
-        # corruption step
-        ground_truth, model_input = self.sampler.forward_diffusion(x0, t)
-        logits = self.model(model_input, t)
-        # ground_truth = F.one_hot(ground_truth, num_classes=self.vocab_size).to(torch.float)
-
-        return logits, ground_truth
     
+    pass
+
+class DiscreteDiffusionExperiment(BaseExperiment):    
     def count_loss(self, prediction, target):
         loss = self.criterion(prediction.view(-1, self.vocab_size), target.view(-1))
         return loss
 
-    def save_epoch_results(self, epoch):
-        save_epoch_samples(
-            self.model, self.tokenizer, self.sampler,
-            self.seq_len, self.T, self.alphas,
-            self.device, epoch, self.out_dir,
-            name=f"len={self.seq_len}, T={self.T}"
-        )
-
-        save_denoising_trace(
-            self.model, self.tokenizer, self.sampler,
-            self.seq_len, self.T, self.alphas,
-            self.device, n_examples=10,
-            out_dir=self.out_dir,
-            out_file=f"len={self.seq_len},T={self.T}_denoise.txt"
-        )
-
-    def save_samples(self, avg_loss_T):
-        samples = []
-        for _ in range(50):
-                    
-            self.model.eval()
-            sample_steps = list(range(self.T, 0, -1))
-            batch = 1
-            vocab_size = len(self.tokenizer.get_vocab())
-            xt = torch.randint(0, vocab_size, (batch, self.seq_len), device=self.device, dtype=torch.long)
-            with torch.no_grad():
-                for t in sample_steps:
-                    t_idx = torch.tensor([t], device=self.device, dtype=torch.long)
-                    logits = self.model(xt, t_idx)  # (1, seq_len, vocab)
-                    probs = F.softmax(logits, dim=-1)
-                    # Getting prediction on every step using random sampling due to logits
-                    xt = torch.multinomial(probs.view(-1, vocab_size), num_samples=1).view(batch, self.seq_len)
-            # decode first sequence
-            ids = xt[0].tolist() 
-            # remove padding tokens
-            if self.tokenizer.token_to_id('[PAD]') is not None:
-                pad_id = self.tokenizer.token_to_id('[PAD]')
-                ids = [i for i in ids if i != pad_id]
-            text = self.tokenizer.decode(ids, skip_special_tokens=False)
-            
-            samples.append(text)
-        with open(os.path.join(self.out_dir, f"samples_seq{self.seq_len}_T{self.T}.txt"), "w") as f:
-            f.write("\n".join(samples))
+    
 
 
 class SimplexDiffusionExperiment(BaseExperiment):
-    def forward_pass(self, x0, t):
-        # corruption step
-        model_input,ground_truth   = self.sampler.forward_diffusion(x0, t)
-        logits = self.model(model_input, t)
-        return logits, ground_truth
-
-    def save_epoch_results(self, epoch):
-        save_epoch_samples(
-            self.model, self.tokenizer, self.sampler,
-            self.seq_len, self.T, self.alphas,
-            self.device, epoch, self.out_dir,
-            name=f"len={self.seq_len}, T={self.T}"
-        )
-
-        save_denoising_trace(
-            self.model, self.tokenizer, self.sampler,
-            self.seq_len, self.T, self.alphas,
-            self.device, n_examples=10,
-            out_dir=self.out_dir,
-            out_file=f"len={self.seq_len},T={self.T}_denoise.txt"
-        )
-
-    def save_samples(self, avg_loss_T):
-        samples = []
-        for _ in range(50):
-            
-            tokens = self.sampler.reverse_diffusion(self.model, self.seq_len, self.T)
-            text = self.tokenizer.decode(tokens, skip_special_tokens=False)
-            samples.append(text)
-        with open(os.path.join(self.out_dir, f"samples_seq{self.seq_len}_T{self.T}.txt"), "w") as f:
-            f.write("\n".join(samples))
-
     def count_loss(self, prediction, target):
         # print(prediction.shape, target.shape)
         loss = self.criterion(prediction, target)
@@ -297,32 +200,6 @@ class ContiniousDiffusionExperiment(BaseExperiment):
         #TODO is_embedded=True
         logits = self.model(model_input, t)
         return logits, ground_truth
-    #TODO make save_epoch_samples and save_denoising_trace as ABC methods
-    def save_epoch_results(self, epoch):
-        save_epoch_samples(
-            self.model, self.tokenizer, self.sampler,
-            self.seq_len, self.T, self.alphas,
-            self.device, epoch, self.out_dir,
-            name=f"len={self.seq_len}, T={self.T}"
-        )
-
-        save_denoising_trace(
-            self.model, self.tokenizer, self.sampler,
-            self.seq_len, self.T, self.alphas,
-            self.device, n_examples=10,
-            out_dir=self.out_dir,
-            out_file=f"len={self.seq_len},T={self.T}_denoise.txt"
-        )
-
-    def save_samples(self, avg_loss_T):
-        samples = []
-        for _ in range(50):
-            
-            tokens = self.sampler.reverse_diffusion(self.model, self.seq_len, self.T)
-            text = self.tokenizer.decode(tokens, skip_special_tokens=False)
-            samples.append(text)
-        with open(os.path.join(self.out_dir, f"samples_seq{self.seq_len}_T{self.T}.txt"), "w") as f:
-            f.write("\n".join(samples))
 
     def count_loss(self, prediction, target):
         # print(prediction.shape, target.shape)

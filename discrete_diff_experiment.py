@@ -19,10 +19,10 @@ from Experiments import DiscreteDiffusionExperiment
 RESULT_PATH = Path('results')
 TOKENIZER_PATH = "models/cleared_tokenizer_bpe.json"
 WORDS_FILE = "data/cleared_dict.txt"
-BATCH_SIZE = 64
+BATCH_SIZE = 256
 T = 10
-SEQ_LEN = 7
-N_EPOCHS = 10
+SEQ_LEN = 5
+N_EPOCHS = 2
 
 if __name__ == "__main__":
     # Example run with reduced sweep for runtime
@@ -37,13 +37,14 @@ if __name__ == "__main__":
     encoded = encode_words_to_ids(words, tokenizer, SEQ_LEN, 1)
     ds = BPEWordDataset(encoded)
     dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
-    model = SimpleDiffusionTransformer(vocab_size=vocab_size, d_model=256, n_heads=4, n_layers=3, seq_len=SEQ_LEN, T=T).to(device)
+    model = SimpleDiffusionTransformer(vocab_size=vocab_size, d_model=256, n_heads=8, n_layers=6, seq_len=SEQ_LEN, T=T).to(device)
     
     sampler = DiscreteDiffusionSampler_test_x0(T,alphas,"cuda", vocab_size)
 
     exp = DiscreteDiffusionExperiment(model,tokenizer, sampler,dl, RESULT_PATH / "test_x0", T, SEQ_LEN,vocab_size, epochs= N_EPOCHS, alphas=alphas)
     exp.run()
 
+    exit()
     sampler = DiscreteDiffusionSampler_test_xt_1(T,alphas,"cuda", vocab_size)
     exp = DiscreteDiffusionExperiment(model,tokenizer, sampler,dl, RESULT_PATH / "test_x1", T, SEQ_LEN,vocab_size, epochs= N_EPOCHS, alphas=alphas)
     exp.run()

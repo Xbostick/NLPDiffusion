@@ -12,7 +12,7 @@ from pathlib import Path
 from Models import SimpleDiffusionTransformer, SimplexDiffusionMLP
 from Tokenizers import encode_words_to_ids, load_tokenizer, load_words_file, MASK_ID
 from types_ import BPEWordDataset
-from utils import make_linear_schedule, sample_from_model, save_denoising_trace, save_epoch_samples, run_experiment
+from utils import make_linear_schedule
 from Samplers import DiscreteDiffusionSampler_test_x0, DiscreteDiffusionSampler_test_xt_1,SimplexDiffusionSampler, ContinuousEmbeddingDiffusionSampler
 from Experiments import DiscreteDiffusionExperiment, SimplexDiffusionExperiment
 
@@ -20,9 +20,9 @@ RESULT_PATH = Path('results')
 TOKENIZER_PATH = "models/cleared_tokenizer_bpe.json"
 WORDS_FILE = "data/cleared_dict.txt"
 BATCH_SIZE = 128
-T = 30
-SEQ_LEN = 15
-N_EPOCHS = 300
+T = 5
+SEQ_LEN = 5
+N_EPOCHS = 1
 
 if __name__ == "__main__":
     # Example run with reduced sweep for runtime
@@ -38,13 +38,13 @@ if __name__ == "__main__":
     ds = BPEWordDataset(encoded)
     dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
     
-    # X0 experiment
+    # # X0 experiment
     model = SimpleDiffusionTransformer(vocab_size=vocab_size, d_model=256, n_heads=4, n_layers=3, seq_len=SEQ_LEN, T=T).to(device)
     sampler = DiscreteDiffusionSampler_test_x0(T,alphas,"cuda", vocab_size)
     exp = DiscreteDiffusionExperiment(model,tokenizer, sampler,dl, RESULT_PATH / "test_x0", T, SEQ_LEN,vocab_size, epochs= N_EPOCHS, alphas=alphas)
     exp.run()
 
-    # xt-1 experiment
+    # # xt-1 experiment
     model = SimpleDiffusionTransformer(vocab_size=vocab_size, d_model=256, n_heads=4, n_layers=3, seq_len=SEQ_LEN, T=T).to(device)
     sampler = DiscreteDiffusionSampler_test_xt_1(T,alphas,"cuda", vocab_size)
     exp = DiscreteDiffusionExperiment(model,tokenizer, sampler,dl, RESULT_PATH / "test_x1", T, SEQ_LEN,vocab_size, epochs= N_EPOCHS, alphas=alphas)
@@ -56,8 +56,8 @@ if __name__ == "__main__":
     exp = SimplexDiffusionExperiment(model,tokenizer, sampler,dl, RESULT_PATH / "simplex", T, SEQ_LEN,vocab_size, epochs= N_EPOCHS, alphas=alphas)
     exp.run()
 
-    # Continious(embedings) diffusion try
-    model = SimplexDiffusionMLP(vocab_size=vocab_size, seq_len=SEQ_LEN, T=T).to(device)
-    sampler = ContinuousEmbeddingDiffusionSampler(T,alphas,"cuda", vocab_size)
-    exp = SimplexDiffusionExperiment(model,tokenizer, sampler,dl, RESULT_PATH / "simplex", T, SEQ_LEN,vocab_size, epochs= N_EPOCHS, alphas=alphas)
-    exp.run()
+    # # Continious(embedings) diffusion try
+    # model = SimplexDiffusionMLP(vocab_size=vocab_size, seq_len=SEQ_LEN, T=T).to(device)
+    # sampler = ContinuousEmbeddingDiffusionSampler(T,alphas,"cuda", vocab_size)
+    # exp = SimplexDiffusionExperiment(model,tokenizer, sampler,dl, RESULT_PATH / "simplex", T, SEQ_LEN,vocab_size, epochs= N_EPOCHS, alphas=alphas)
+    # exp.run()

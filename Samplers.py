@@ -28,14 +28,31 @@ class BaseDiffusionSampler(ABC):
         pass
 
     @abstractmethod
-    def reverse_diffusion(self, model, seq_len: int):
+    def reverse_diffusion(self, model, seq_len: int, T: int):
         """
-        Sample new data by iteratively denoising from x_T to x_0 using the model.
-        Returns final data tensor or sampled tokens.
+        Given clean data x0 and timestep t, return (x_t, noise_info)
+        noise_info is whatever auxiliary data needed for training loss.
         """
         pass
 
-class DiscreteDiffusionSampler_test_x0(BaseDiffusionSampler):
+    
+    
+class BaseDiscreteDiffusionSampler(BaseDiffusionSampler):
+    @torch.no_grad()
+    def reverse_diffusion(self, model, seq_len: int, T: int):
+        trace = []
+        x_t = torch.randint(0, self.vocab_size, [1,seq_len], device=self.device)
+        for t in reversed(range(1, T + 1)):
+            t_tensor = torch.tensor([t], device=self.device)
+            logits = model(x_t, t_tensor)
+            probs = F.softmax(logits, dim=-1)
+            x_t = torch.multinomial(probs.view(-1, self.vocab_size), 1).view(1, seq_len)
+            trace.append(x_t)
+        return trace
+
+
+
+class DiscreteDiffusionSampler_test_x0(BaseDiscreteDiffusionSampler):
     def __init__(self, T, alphas, device, vocab_size):
         super().__init__(T, alphas, device)
         self.vocab_size = vocab_size
@@ -53,20 +70,8 @@ class DiscreteDiffusionSampler_test_x0(BaseDiffusionSampler):
         xt[replace_mask] = random_tokens[replace_mask]
         return x0,xt
     
-    @torch.no_grad()
-    def reverse_diffusion(self, model, seq_len: int, T: int):
-        """
-        Reverse sampling: categorical denoising.
-        """
-        x_t = torch.randint(0, self.vocab_size, [1,seq_len], device=self.device)
-        for t in reversed(range(1, T + 1)):
-            t_tensor = torch.tensor([t], device=self.device)
-            logits = model(x_t, t_tensor)
-            probs = F.softmax(logits, dim=-1)
-            x_t = torch.multinomial(probs.view(-1, self.vocab_size), 1).view(1, seq_len)
-        return x_t.cpu().detach().numpy()[0]
-
-class DiscreteDiffusionSampler_test_xt_1(BaseDiffusionSampler):
+    
+class DiscreteDiffusionSampler_test_xt_1(BaseDiscreteDiffusionSampler):
     def __init__(self, T, alphas, device, vocab_size):
         super().__init__(T, alphas, device)
         self.vocab_size = vocab_size
@@ -101,18 +106,6 @@ class DiscreteDiffusionSampler_test_xt_1(BaseDiffusionSampler):
 
         return x0,xt
     
-    @torch.no_grad()
-    def reverse_diffusion(self, model, seq_len: int, T: int):
-        """
-        Reverse sampling: categorical denoising.
-        """
-        x_t = torch.randint(0, self.vocab_size, [1,seq_len], device=self.device)
-        for t in reversed(range(1, T + 1)):
-            t_tensor = torch.tensor([t], device=self.device)
-            logits = model(x_t, t_tensor)
-            probs = F.softmax(logits, dim=-1)
-            x_t = torch.multinomial(probs.view(-1, self.vocab_size), 1).view(1, seq_len)
-        return x_t.cpu().detach().numpy()[0]
 
 
 
@@ -183,6 +176,7 @@ class SimplexDiffusionSampler(BaseDiffusionSampler):
         """
         DDPM-like reverse diffusion on simplex.
         """
+        trace = []
         x_t = torch.randn(1, seq_len, self.vocab_size, device=self.device)
         for t in reversed(range(1,T + 1)):
             t_tensor = torch.tensor([t], device=self.device)
@@ -193,9 +187,11 @@ class SimplexDiffusionSampler(BaseDiffusionSampler):
             x_t = (1 / torch.sqrt(a_prev)) * (x_t - (beta_t / torch.sqrt(1 - a_t)) * eps)
             if t > 1:
                 x_t += torch.sqrt(beta_t) * torch.randn_like(x_t)
-        probs = F.softmax(x_t[0], dim=-1)
-        tokens = torch.argmax(probs, dim=-1)
-        return tokens.cpu().detach().numpy()
+            probs = F.softmax(x_t[0], dim=-1)
+            tokens = torch.argmax(probs, dim=-1).unsqueeze(0)
+            trace.append(tokens)
+           
+        return trace
 
 class ContinuousEmbeddingDiffusionSampler(BaseDiffusionSampler):
     """
